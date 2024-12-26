@@ -11,7 +11,12 @@ def start_detect():
     weight = json["weight"]
     source = json["source"]
     id = json["id"]
-    dt = detect.create_detection(id = id, weight=weight, source = source)
+    project = json["project"]
+    labels = json["labels"]
+    name = json["name"]
+    print(f"weight:{weight}, source:{source}, id: {id}, project:{project}, labels:{labels}")
+    
+    dt = detect.create_detection(weights=weight, source = source, project = project, labels = labels, name = name, detect_id= id)
     dt.start_detect()
     result = responce.result(200, "success")
     return jsonify(result), 200
@@ -26,3 +31,11 @@ def stop_detect():
     
     result = responce.result(200, "success")
     return jsonify(result), 200
+
+@bp.route('/detect/result/<detect_id>', methods=["GET"])
+def get_detect_result(detect_id):
+    dt = detect.get_detection(detect_id)
+    msg = ""
+    if dt is not None:
+        msg = dt.image_base64
+    return msg, 200

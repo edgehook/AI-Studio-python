@@ -1,3 +1,4 @@
+import json
 import os
 import platform
 import sys
@@ -5,6 +6,7 @@ import threading
 from pathlib import Path
 
 import torch
+import base64
 
 FILE = Path(__file__).resolve()
 ROOT = FILE.parents[0]  # YOLOv5 root directory
@@ -30,39 +32,42 @@ from utils.general import (
 from utils.torch_utils import select_device, smart_inference_mode
 from datetime import datetime, timedelta
 
+from apiServer.transport import notify
+
 detection_map = {}
-def create_detection(id,  weight, source, thres=0.25, view_img=False, project="../../runs/detect", name="exp"):
-    dt= detection(weight= weight, source= source, thres= thres, view_img= view_img, project= project, name= name)
-    detection_map[id] = dt
+def create_detection(weights, source, labels, detect_id, thres=0.25, view_img=False, project="../../runs/detect", name="exp"):
+    dt= detection(weights= weights, source= source, thres= thres, view_img= view_img, project= project, name= name, labels=labels, detect_id= detect_id)
+    detection_map[detect_id] = dt
     return dt
 
-def get_detection(id):
-    dt = detection_map.get(id, None)
+def get_detection(detect_id):
+    dt = detection_map.get(detect_id, None)
     return dt
  
-def is_timestamp_more_than_minutes(timestamp_end, timestamp_start):
+def is_timestamp_more_than_minutes(timestamp_end, timestamp_start, interval):
     diff = timestamp_end - timestamp_start
     LOGGER.info(diff)
 # 检查时间差是否等于10分钟
-    return diff > 1*60
+    return diff > interval
 class detection:
-    def __init__(self, weight, source, thres, view_img, project, name):
+    def __init__(self, weights, source, thres, view_img, project, name, labels, detect_id):
         self.thread = None
-        self.weight = weight
+        self.weights = weights
         self.source = source
         self.conf_thres=thres
         self.view_img= view_img
         self.project= project
         self.name= name 
+        self.labels = labels
         self.stop = False
+        self.is_report = True
+        self.image_base64 = ""
+        self.detect_id = detect_id
     def start_detect(self):
         if self.thread is None or not self.thread.is_alive():
-            print("aaa")
-            kwargs = {"weights": self.weight, "source": self.source, "conf_thres": self.conf_thres,"project": self.project, "name":self.name}
+            kwargs = { "conf_thres": self.conf_thres}
             self.thread = threading.Thread(target=self.detect, kwargs=kwargs)
-            print("bbb")
             self.thread.start()
-            print("ccc")
         else:
             LOGGER.info("Thread is already running.")
     def stop_detect(self):
@@ -70,8 +75,6 @@ class detection:
 
     def detect(
         self,
-        weights=ROOT / "../../yolov5s.pt",  # model path or triton URL
-        source=ROOT / "../../data/images",  # file/dir/URL/glob/screen/0(webcam)
         data=ROOT / "../../data/coco128.yaml",  # dataset.yaml path
         imgsz=(640, 640),  # inference size (height, width)
         conf_thres=0.25,  # confidence threshold
@@ -86,34 +89,31 @@ class detection:
         augment=False,  # augmented inference
         visualize=False,  # visualize features
         update=False,  # update all models
-        project=ROOT / "../../runs/detect",  # save results to project/name
-        name="exp",  # save results to project/name
-        exist_ok=True,  # existing project/name ok, do not increment
         line_thickness=3,  # bounding box thickness (pixels)
         hide_labels=False,  # hide labels
         hide_conf=False,  # hide confidences
         half=False,  # use FP16 half-precision inference
         dnn=False,  # use OpenCV DNN for ONNX inference
         vid_stride=1,  # video frame-rate stride
-        labels=None,  # filter by labels: --labels 0, or --labels 0 2 3
     ):
-        source = str(source)
-        save_img = not nosave and not source.endswith(".txt")  # save inference images
-        is_file = Path(source).suffix[1:] in (IMG_FORMATS + VID_FORMATS)
-        is_url = source.lower().startswith(("rtsp://", "rtmp://", "http://", "https://"))
-        webcam = source.isnumeric() or source.endswith(".streams") or (is_url and not is_file)
-        screenshot = source.lower().startswith("screen")
+        
+        self.source = str(self.source).lstrip()
+        save_img = not nosave and not self.source.endswith(".txt")  # save inference images
+        is_file = Path(self.source).suffix[1:] in (IMG_FORMATS + VID_FORMATS)
+        is_url = self.source.lower().startswith(("rtsp://", "rtmp://", "http://", "https://"))
+        webcam = self.source.isnumeric() or self.source.endswith(".streams") or (is_url and not is_file)
+        screenshot = self.source.lower().startswith("screen")
         if is_url and is_file:
-            source = check_file(source)  # download
+            self.source = check_file(self.source)  # download
 
         # Directories
-        save_dir = increment_path(Path(project) / name, exist_ok=True)  # increment run
-        # save_dir = Path(project) / name
+        save_dir = increment_path(Path(self.project) / self.name, exist_ok=True)  # increment run
+        # save_dir = Path(self.project) / self.name
         save_dir.mkdir(parents=True, exist_ok=True)  # make dir
 
         # Load model
         device = select_device(device)
-        model = DetectMultiBackend(weights, device=device, dnn=dnn, data=data, fp16=half)
+        model = DetectMultiBackend(self.weights, device=device, dnn=dnn, data=data, fp16=half)
         stride, names, pt = model.stride, model.names, model.pt
         imgsz = check_img_size(imgsz, s=stride)  # check image size
 
@@ -121,12 +121,12 @@ class detection:
         bs = 1  # batch_size
         if webcam:
             # view_img = check_imshow(warn=True)
-            dataset = LoadStreams(source, img_size=imgsz, stride=stride, auto=pt, vid_stride=vid_stride)
+            dataset = LoadStreams(self.source, img_size=imgsz, stride=stride, auto=pt, vid_stride=vid_stride)
             bs = len(dataset)
         elif screenshot:
-            dataset = LoadScreenshots(source, img_size=imgsz, stride=stride, auto=pt)
+            dataset = LoadScreenshots(self.source, img_size=imgsz, stride=stride, auto=pt)
         else:
-            dataset = LoadImages(source, img_size=imgsz, stride=stride, auto=pt, vid_stride=vid_stride)
+            dataset = LoadImages(self.source, img_size=imgsz, stride=stride, auto=pt, vid_stride=vid_stride)
         vid_path, vid_writer = [None] * bs, [None] * bs
         # signal.signal(signal.SIGINT, signal_handler_wrapper(vid_writer)) 
         # signal.signal(signal.SIGTERM, signal_handler_wrapper(vid_writer)) 
@@ -134,6 +134,7 @@ class detection:
         model.warmup(imgsz=(1 if pt or model.triton else bs, 3, *imgsz))  # warmup
         seen, windows, dt = 0, [], (Profile(device=device), Profile(device=device), Profile(device=device))
         standardTime = datetime.now()
+        detect_start_time = datetime.now()
         saveVideoFileName = ""
         for path, im, im0s, vid_cap, s in dataset:
             with dt[0]:
@@ -162,7 +163,9 @@ class detection:
             with dt[2]:
                 pred = non_max_suppression(pred, conf_thres, iou_thres, classes, agnostic_nms, max_det=max_det)      
             # Process predictions
-            for i, det in enumerate(pred):  # per image
+            for i, det in enumerate(pred): 
+                notify_data = []
+                 # per image
                 seen += 1
                 if webcam:  # batch_size >= 1
                     p, im0, frame = path[i], im0s[i].copy(), dataset.count
@@ -184,16 +187,16 @@ class detection:
                     for c in det[:, 5].unique():
                         n = (det[:, 5] == c).sum()  # detections per class
                         s += f"{n} {names[int(c)]}{'s' * (n > 1)}, "  # add to string
-
+                        notify_data.append({"label": names[int(c)], "count": f"{n}"})
                     # Write results
                     for *xyxy, conf, cls in reversed(det):
                         c = int(cls)  # integer class
                         label = names[c] if hide_conf else f"{names[c]}"
                         confidence = float(conf)
                         confidence_str = f"{confidence:.2f}"
-                        if labels is not None:
-                            for l in labels:
-                                # LOGGER.info("label:"+l+"## detect name:"+names[int(cls)])
+                        if self.labels is not None and isinstance(self.labels, list):
+                            for l in self.labels:
+                                LOGGER.info("label:"+l+"## detect name:"+names[int(cls)])
                                 if l == label:
                                     if save_img or view_img:  # Add bbox to image
                                         c = int(cls)  # integer class
@@ -237,7 +240,7 @@ class detection:
                     else:  # 'stream'
                         endTime = datetime.now()
                         
-                        if vid_path[i] == None or is_timestamp_more_than_minutes(int(endTime.timestamp()), int(standardTime.timestamp())):  # new video
+                        if vid_path[i] == None or is_timestamp_more_than_minutes(int(endTime.timestamp()), int(standardTime.timestamp()), 60*1):  # new video
                             standardTime = endTime
                             time_str = endTime.strftime("%y-%m-%d-%H-%M-%S")
                             save_path = str(save_dir / time_str)
@@ -259,18 +262,31 @@ class detection:
                         vid_writer[i].write(im0)
             detectImgPath =  str(save_dir / "detect.jpg")
             cv2.imwrite(detectImgPath, im0)
+            success, encoded_image = cv2.imencode('.jpg', im0)
+            if success:
+                self.image_base64 =base64.b64encode(encoded_image.tobytes()).decode('utf-8')
             # Print time (inference-only)
             LOGGER.info(f"{s}{'' if len(det) else '(no detections), '}{saveVideoFileName}")
+            detect_report_time = datetime.now()
+            if len(det):
+                if self.is_report:
+                    notify.add_notify_msg({"type": "object_detect", "data": json.dumps(notify_data), "image": self.image_base64, "id": self.detect_id, "name": self.name})
+                    self.is_report = False
+                else:
+                    if is_timestamp_more_than_minutes(int(detect_report_time.timestamp()), int(detect_start_time.timestamp()), 60*10):
+                        self.is_report = True
+                
             if self.stop:
                 for item in vid_writer:
                     item.release()
+                del detection_map[self.detect_id]
                 return
 
         # Print results
         t = tuple(x.t / seen * 1e3 for x in dt)  # speeds per image
         LOGGER.info(f"Speed: %.1fms pre-process, %.1fms inference, %.1fms NMS per image at shape {(1, 3, *imgsz)}" % t)
         if update:
-            strip_optimizer(weights[0])  # update model (to fix SourceChangeWarning)
+            strip_optimizer(self.weights[0])  # update model (to fix SourceChangeWarning)
 
 
 
