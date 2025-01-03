@@ -17,6 +17,7 @@ def notify():
         msg = data_queue.get()
         if msg is None:
             time.sleep(10)
+            continue
         try:
             # print(f"notify: {notify_url}, data: {["cmsgontent"]}")
             data = json.dumps(msg)

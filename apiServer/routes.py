@@ -1,9 +1,10 @@
-from flask import Blueprint, jsonify, request
-
+from flask import Blueprint, jsonify, request, Flask
 from apiServer.detection import detect
 from apiServer.utils import responce
+from apiServer.transport import websocket
 
 bp = Blueprint('main', __name__)
+app = Flask(__name__)
 
 @bp.route('/detect', methods=["POST"])
 def start_detect():
@@ -25,7 +26,7 @@ def start_detect():
 def stop_detect():
     json = request.get_json()
     id = json["id"]
-    dt = detect.get_detection(id = id)
+    dt = detect.get_detection(detect_id=id)
     if dt is not None:
         dt.stop_detect()
     

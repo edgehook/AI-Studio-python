@@ -32,7 +32,8 @@ from utils.general import (
 from utils.torch_utils import select_device, smart_inference_mode
 from datetime import datetime, timedelta
 
-from apiServer.transport import notify
+from apiServer.transport import notify, websocket
+
 
 detection_map = {}
 def create_detection(weights, source, labels, detect_id, thres=0.25, view_img=False, project="../../runs/detect", name="exp"):
@@ -265,6 +266,8 @@ class detection:
             success, encoded_image = cv2.imencode('.jpg', im0)
             if success:
                 self.image_base64 =base64.b64encode(encoded_image.tobytes()).decode('utf-8')
+                websocket.push_msg(self.detect_id, self.image_base64)
+                
             # Print time (inference-only)
             LOGGER.info(f"{s}{'' if len(det) else '(no detections), '}{saveVideoFileName}")
             detect_report_time = datetime.now()
