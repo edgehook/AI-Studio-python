@@ -47,8 +47,6 @@ def get_detection(detect_id):
  
 def is_timestamp_more_than_minutes(timestamp_end, timestamp_start, interval):
     diff = timestamp_end - timestamp_start
-    LOGGER.info(diff)
-# 检查时间差是否等于10分钟
     return diff > interval
 class detection:
     def __init__(self, weights, source, thres, view_img, project, name, labels, detect_id):
@@ -136,6 +134,7 @@ class detection:
         seen, windows, dt = 0, [], (Profile(device=device), Profile(device=device), Profile(device=device))
         standardTime = datetime.now()
         detect_start_time = datetime.now()
+        hearbeat_start_time = datetime.now()
         saveVideoFileName = ""
         for path, im, im0s, vid_cap, s in dataset:
             with dt[0]:
@@ -197,7 +196,7 @@ class detection:
                         confidence_str = f"{confidence:.2f}"
                         if self.labels is not None and isinstance(self.labels, list):
                             for l in self.labels:
-                                LOGGER.info("label:"+l+"## detect name:"+names[int(cls)])
+                                # LOGGER.info("label:"+l+"## detect name:"+names[int(cls)])
                                 if l == label:
                                     if save_img or view_img:  # Add bbox to image
                                         c = int(cls)  # integer class
@@ -263,22 +262,30 @@ class detection:
                         vid_writer[i].write(im0)
             detectImgPath =  str(save_dir / "detect.jpg")
             cv2.imwrite(detectImgPath, im0)
-            success, encoded_image = cv2.imencode('.jpg', im0)
-            if success:
-                self.image_base64 =base64.b64encode(encoded_image.tobytes()).decode('utf-8')
-                websocket.push_msg(self.detect_id, self.image_base64)
+            # print(websocket.websocket_map)
+            websocket_connections = websocket.websocket_map.get(self.detect_id, None) 
+            if websocket_connections:
+                success, encoded_image = cv2.imencode('.jpg', im0)
+                if success:
+                    self.image_base64 =base64.b64encode(encoded_image.tobytes()).decode('utf-8')
+                    websocket.push_msg(self.detect_id, self.image_base64)
                 
             # Print time (inference-only)
             LOGGER.info(f"{s}{'' if len(det) else '(no detections), '}{saveVideoFileName}")
             detect_report_time = datetime.now()
+            # push nofity msg
             if len(det):
                 if self.is_report:
-                    notify.add_notify_msg({"type": "object_detect", "data": json.dumps(notify_data), "image": self.image_base64, "id": self.detect_id, "name": self.name})
+                    notify.push_notify_msg({"type": "object_detect", "data": json.dumps(notify_data), "image": self.image_base64, "id": self.detect_id, "name": self.name})
                     self.is_report = False
                 else:
                     if is_timestamp_more_than_minutes(int(detect_report_time.timestamp()), int(detect_start_time.timestamp()), 60*10):
+                        detect_start_time = detect_report_time
                         self.is_report = True
-                
+             # push hearbeat
+            if is_timestamp_more_than_minutes(int(detect_report_time.timestamp()), int(hearbeat_start_time.timestamp()), 30):
+                hearbeat_start_time = detect_report_time
+                notify.push_hearbeat_msg(self.detect_id) 
             if self.stop:
                 for item in vid_writer:
                     item.release()
