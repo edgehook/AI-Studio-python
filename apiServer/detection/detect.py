@@ -5,9 +5,10 @@ import sys
 import threading
 from pathlib import Path
 
+import numpy as np
 import torch
 import base64
-
+import subprocess
 FILE = Path(__file__).resolve()
 ROOT = FILE.parents[0]  # YOLOv5 root directory
 if str(ROOT) not in sys.path:
@@ -36,8 +37,17 @@ from apiServer.transport import notify, websocket
 
 
 detection_map = {}
-def create_detection(weights, source, labels, detect_id, thres=0.25, view_img=False, project="../../runs/detect", name="exp"):
-    dt= detection(weights= weights, source= source, thres= thres, view_img= view_img, project= project, name= name, labels=labels, detect_id= detect_id)
+def create_detection(weights, source, labels, detect_id, thres=0.25, view_img=False, detect_region=None, project="../../runs/detect", name="exp"):
+    dt= detection(
+        weights= weights, 
+        source= source, 
+        thres= thres, 
+        view_img= view_img, 
+        project= project, 
+        name= name,
+        labels=labels, 
+        detect_id= detect_id,
+        detect_region= detect_region)
     detection_map[detect_id] = dt
     return dt
 
@@ -48,8 +58,19 @@ def get_detection(detect_id):
 def is_timestamp_more_than_minutes(timestamp_end, timestamp_start, interval):
     diff = timestamp_end - timestamp_start
     return diff > interval
+
+def get_camera_screen(source):
+    print(f"source: {source}")
+    dataset = LoadStreams(source)
+    for path, im, im0s, vid_cap, s in dataset:
+        success, encoded_image = cv2.imencode('.jpg', im0s[0])
+        if success:
+            image_base64 =base64.b64encode(encoded_image.tobytes()).decode('utf-8')
+            return image_base64
+    return ""
+
 class detection:
-    def __init__(self, weights, source, thres, view_img, project, name, labels, detect_id):
+    def __init__(self, weights, source, thres, view_img, project, name, labels, detect_id, detect_region):
         self.thread = None
         self.weights = weights
         self.source = source
@@ -58,20 +79,39 @@ class detection:
         self.project= project
         self.name= name 
         self.labels = labels
-        self.stop = False
+        self.detect_stop = False
+        self.camera_stop = False
         self.is_report = True
         self.image_base64 = ""
         self.detect_id = detect_id
+        self.detect_region = detect_region
     def start_detect(self):
         if self.thread is None or not self.thread.is_alive():
-            kwargs = { "conf_thres": self.conf_thres}
-            self.thread = threading.Thread(target=self.detect, kwargs=kwargs)
-            self.thread.start()
+            if self.weights:
+                kwargs = { "conf_thres": self.conf_thres}
+                self.thread = threading.Thread(target=self.detect, kwargs=kwargs)
+                self.thread.start()
+            else:
+                self.thread = threading.Thread(target=self.camera)
+                self.thread.start()
         else:
             LOGGER.info("Thread is already running.")
     def stop_detect(self):
-        self.stop = True
-
+        self.detect_stop = True
+    def stop_camera(self):
+        self.camera_stop = True
+    def camera(
+        self
+    ):
+        dataset = LoadStreams(self.source)
+        for path, im, im0s, vid_cap, s in dataset:
+            success, encoded_image = cv2.imencode('.jpg', im0s[0])
+            if success:
+                image_base64 =base64.b64encode(encoded_image.tobytes()).decode('utf-8')
+                websocket.push_msg(self.detect_id, image_base64)
+            if self.camera_stop:
+                return
+        
     def detect(
         self,
         data=ROOT / "../../data/coco128.yaml",  # dataset.yaml path
@@ -137,6 +177,43 @@ class detection:
         hearbeat_start_time = datetime.now()
         saveVideoFileName = ""
         for path, im, im0s, vid_cap, s in dataset:
+            #detect_region: [[x,y], [x1,y1], [x2,y2], [x3,y3]]
+            if self.detect_region and len(self.detect_region) >0:
+                w = self.detect_region[0][0]
+                h = self.detect_region[0][1]
+                # wl1 = 4 / w # Upper left width ratio
+                # hl1 = 3 / 10 # Upper left height ratio
+                # wl2 = 9.8 / 10  # Upper right width ratio
+                # hl2 = 3 / 10  # Upper right height ratio
+                # wl3 = 9.8 / 10  # Bottom right width ratio
+                # hl3 = 8 / 10  # Bottom right height ratio
+                # wl4 = 4 / 10  # Bottom left width ratio
+                # hl4 = 8 / 10  # Bottom left height ratio
+                if webcam:
+                    for b in range(0,im.shape[0]):
+                        np_array=[]
+                        for item in self.detect_region[1:]:
+                            wl = item[0] / w
+                            hl = item[1] / h
+                            np_array.append([int(im[b].shape[2] * wl), int(im[b].shape[1] * hl)])
+                        mask = np.zeros([im[b].shape[1], im[b].shape[2]], dtype=np.uint8)
+                        pts = np.array(np_array, np.int32)
+                        mask = cv2.fillPoly(mask,[pts],(255,255,255))
+                        imgc = im[b].transpose((1, 2, 0))
+                        imgc = cv2.add(imgc, np.zeros(np.shape(imgc), dtype=np.uint8), mask=mask)
+                        im[b] = imgc.transpose((2, 0, 1))
+                else:
+                    np_array=[]
+                    for item in self.detect_region[1:]:
+                        wl = item[0] / w
+                        hl = item[1] / h
+                        np_array.append([int(im.shape[2] * wl), int(im.shape[1] * hl)])
+                    mask = np.zeros([im.shape[1], im.shape[2]], dtype=np.uint8)
+                    pts = np.array(np_array, np.int32)
+                    mask = cv2.fillPoly(mask, [pts], (255,255,255))
+                    im = im.transpose((1, 2, 0))
+                    im = cv2.add(im, np.zeros(np.shape(im), dtype=np.uint8), mask=mask)
+                    im = im.transpose((2, 0, 1))
             with dt[0]:
                 im = torch.from_numpy(im).to(model.device)
                 im = im.half() if model.fp16 else im.float()  # uint8 to fp16/32
@@ -167,11 +244,42 @@ class detection:
                 notify_data = []
                  # per image
                 seen += 1
-                if webcam:  # batch_size >= 1
-                    p, im0, frame = path[i], im0s[i].copy(), dataset.count
-                    s += f"{i}: "
+                if self.detect_region and len(self.detect_region) >0:
+                    w = self.detect_region[0][0]
+                    h = self.detect_region[0][1]
+                    np_array = []
+                    if webcam:  # batch_size >= 1
+                        p, s, im0, frame = path[i], f'{i}: ', im0s[i].copy(), dataset.count
+                        for item in self.detect_region[1:]:
+                            wl = item[0] / w
+                            hl = item[1] / h
+                            np_array.append([int(im0.shape[1] * wl), int(im0.shape[0] * hl)])
+                        print(np_array)
+                        cv2.putText(im0, "Detection Region",(int(np_array[0][0]) - 5, int(np_array[0][1]) - 5),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 2, cv2.LINE_AA)
+
+                        pts = np.array(np_array, np.int32)  # pts4
+                        zeros = np.zeros((im0.shape), dtype=np.uint8)
+                        mask = cv2.fillPoly(zeros, [pts], color=(200, 200, 200))
+                        im0 = cv2.addWeighted(im0, 1, mask, 0.2, 0)
+                        #cv2.polylines(im0, [pts], True, (0, 0, 255), 3)
+                    else:
+                        p, s, im0, frame = path, '', im0s.copy(), getattr(dataset, 'frame', 0)
+                        cv2.putText(im0, "Detection Region", (int(np_array[0][0]) - 5, int(np_array[0][1] - 5)),
+                                    cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 2, cv2.LINE_AA)
+                        pts = np.array(np_array, np.int32)  # pts4
+                        # pts = pts.reshape((-1, 1, 2))
+                        zeros = np.zeros((im0.shape), dtype=np.uint8)
+                        mask = cv2.fillPoly(zeros, [pts], color=(200, 200, 200))
+                        im0 = cv2.addWeighted(im0, 1, mask, 0.2, 0)
+                        #cv2.polylines(im0, [pts], True, (255, 255, 0), 3)  
                 else:
-                    p, im0, frame = path, im0s.copy(), getattr(dataset, "frame", 0)
+
+                    if webcam:  # batch_size >= 1
+                        p, im0, frame = path[i], im0s[i].copy(), dataset.count
+                        s += f"{i}: "
+                    else:
+                        p, im0, frame = path, im0s.copy(), getattr(dataset, "frame", 0)
 
                 p = Path(p)  # to Path
                 save_path = str(save_dir / p.name)  # im.jpg
@@ -187,14 +295,17 @@ class detection:
                     for c in det[:, 5].unique():
                         n = (det[:, 5] == c).sum()  # detections per class
                         s += f"{n} {names[int(c)]}{'s' * (n > 1)}, "  # add to string
-                        notify_data.append({"label": names[int(c)], "count": f"{n}"})
+                        if self.labels is not None and isinstance(self.labels, list) and len(self.labels) >0:
+                            for l in self.labels:
+                                if names[int(c)] == l:
+                                    notify_data.append({"label": names[int(c)], "count": f"{n}"})
                     # Write results
                     for *xyxy, conf, cls in reversed(det):
                         c = int(cls)  # integer class
                         label = names[c] if hide_conf else f"{names[c]}"
                         confidence = float(conf)
                         confidence_str = f"{confidence:.2f}"
-                        if self.labels is not None and isinstance(self.labels, list):
+                        if self.labels is not None and isinstance(self.labels, list) and len(self.labels) >0:
                             for l in self.labels:
                                 # LOGGER.info("label:"+l+"## detect name:"+names[int(cls)])
                                 if l == label:
@@ -267,16 +378,20 @@ class detection:
             if websocket_connections:
                 success, encoded_image = cv2.imencode('.jpg', im0)
                 if success:
-                    self.image_base64 =base64.b64encode(encoded_image.tobytes()).decode('utf-8')
-                    websocket.push_msg(self.detect_id, self.image_base64)
+                    image_base64 =base64.b64encode(encoded_image.tobytes()).decode('utf-8')
+                    websocket.push_msg(self.detect_id, image_base64)
                 
             # Print time (inference-only)
             LOGGER.info(f"{s}{'' if len(det) else '(no detections), '}{saveVideoFileName}")
             detect_report_time = datetime.now()
             # push nofity msg
-            if len(det):
+            if len(notify_data):
                 if self.is_report:
-                    notify.push_notify_msg({"type": "object_detect", "data": json.dumps(notify_data), "image": self.image_base64, "id": self.detect_id, "name": self.name})
+                    success, encoded_image = cv2.imencode('.jpg', im0)
+                    image_base64 = ""
+                    if success:
+                        image_base64 =base64.b64encode(encoded_image.tobytes()).decode('utf-8')
+                    notify.push_notify_msg({"type": "object_detect", "data": json.dumps(notify_data), "image": image_base64, "id": self.detect_id, "name": self.name})
                     self.is_report = False
                 else:
                     if is_timestamp_more_than_minutes(int(detect_report_time.timestamp()), int(detect_start_time.timestamp()), 60*10):
@@ -286,7 +401,7 @@ class detection:
             if is_timestamp_more_than_minutes(int(detect_report_time.timestamp()), int(hearbeat_start_time.timestamp()), 30):
                 hearbeat_start_time = detect_report_time
                 notify.push_hearbeat_msg(self.detect_id) 
-            if self.stop:
+            if self.detect_stop:
                 for item in vid_writer:
                     item.release()
                 del detection_map[self.detect_id]
