@@ -22,10 +22,11 @@ def start_detect():
     project = json["project"]
     labels = json["labels"]
     name = json["name"]
-    print(f"weight:{weight}, source:{source}, id: {id}, project:{project}, labels:{labels}")
+    thres = json["thres"]
+    print(f"weight:{weight}, source:{source}, id: {id}, project:{project}, labels:{labels}, thres: {thres}")
     detect_region = json["detectPoints"]
     print(detect_region)
-    dt = detect.create_detection(weights=weight, source = source, project = project, labels = labels, name = name, detect_id= id, detect_region= detect_region)
+    dt = detect.create_detection(weights=weight, source = source, project = project, labels = labels, name = name, detect_id= id, detect_region= detect_region, thres=thres)
     dt.start_detect()
     result = responce.result(200, "success")
     return jsonify(result), 200

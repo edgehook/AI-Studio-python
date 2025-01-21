@@ -457,6 +457,7 @@ class LoadStreams:
         self.mode = "stream"
         self.img_size = img_size
         self.stride = stride
+        self.detect_stop = False
         self.vid_stride = vid_stride  # video frame-rate stride
         sources = Path(sources).read_text().rsplit() if os.path.isfile(sources) else [sources]
         n = len(sources)
@@ -475,16 +476,25 @@ class LoadStreams:
             if s == 0:
                 assert not is_colab(), "--source 0 webcam unsupported on Colab. Rerun command in a local environment."
                 assert not is_kaggle(), "--source 0 webcam unsupported on Kaggle. Rerun command in a local environment."
+            if type(s) == int:
 
-            if s == 0:
-                print('[gstreamer] ', gstreamer_pipeline(sensor_id=s, capture_width=2880, capture_height=1860))
-                cap = cv2.VideoCapture(gstreamer_pipeline(sensor_id=s, capture_width=2880, capture_height=1860), cv2.CAP_GSTREAMER)
-            elif s == 1:
-                print('[gstreamer] ', gstreamer_pipeline(sensor_id=s, capture_width=3840, capture_height=2160))
-                cap = cv2.VideoCapture(gstreamer_pipeline(sensor_id=s, capture_width=3840, capture_height=2160), cv2.CAP_GSTREAMER)
+                print('[gstreamer] ', gstreamer_pipeline(sensor_id=s, capture_width=1920, capture_height=1080))
+                cap = cv2.VideoCapture(gstreamer_pipeline(sensor_id=s, capture_width=1920, capture_height=1080), cv2.CAP_GSTREAMER)
             else:
                 print('[gstreamer] ', gstreamer_pipeline())
                 cap = cv2.VideoCapture(s)
+            # if s == 0:
+            #     print('[gstreamer] ', gstreamer_pipeline(sensor_id=s, capture_width=2880, capture_height=1860))
+            #     cap = cv2.VideoCapture(gstreamer_pipeline(sensor_id=s, capture_width=2880, capture_height=1860), cv2.CAP_GSTREAMER)
+            # elif s == 1:
+            #     print('[gstreamer] ', gstreamer_pipeline(sensor_id=s, capture_width=3840, capture_height=2160))
+            #     cap = cv2.VideoCapture(gstreamer_pipeline(sensor_id=s, capture_width=3840, capture_height=2160), cv2.CAP_GSTREAMER)
+            # elif s == 2:
+            #     print('[gstreamer] ', gstreamer_pipeline(sensor_id=s, capture_width=1920, capture_height=1080))
+            #     cap = cv2.VideoCapture(gstreamer_pipeline(sensor_id=s, capture_width=1920, capture_height=1080), cv2.CAP_GSTREAMER)
+            # else:
+            #     print('[gstreamer] ', gstreamer_pipeline())
+            #     cap = cv2.VideoCapture(s)
             # cap = cv2.VideoCapture(s)
             assert cap.isOpened(), f"{st}Failed to open {s}"
             w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -492,7 +502,7 @@ class LoadStreams:
             fps = cap.get(cv2.CAP_PROP_FPS)  # warning: may return 0 or nan
             self.frames[i] = max(int(cap.get(cv2.CAP_PROP_FRAME_COUNT)), 0) or float("inf")  # infinite stream fallback
             self.fps[i] = max((fps if math.isfinite(fps) else 0) % 100, 0) or 30  # 30 FPS fallback
-
+            self.cap = cap
             _, self.imgs[i] = cap.read()  # guarantee first frame
             self.threads[i] = Thread(target=self.update, args=([i, cap, s]), daemon=True)
             LOGGER.info(f"{st} Success ({self.frames[i]} frames {w}x{h} at {self.fps[i]:.2f} FPS)")
@@ -510,18 +520,27 @@ class LoadStreams:
     def update(self, i, cap, stream):
         """Reads frames from stream `i`, updating imgs array; handles stream reopening on signal loss."""
         n, f = 0, self.frames[i]  # frame number, frame array
-        while cap.isOpened() and n < f:
-            n += 1
-            cap.grab()  # .read() = .grab() followed by .retrieve()
-            if n % self.vid_stride == 0:
-                success, im = cap.retrieve()
-                if success:
-                    self.imgs[i] = im
+        try:
+            while  n < f and not self.detect_stop:
+                if cap.isOpened():
+                    n += 1
+                    cap.grab()  # .read() = .grab() followed by .retrieve()
+                    if n % self.vid_stride == 0:
+                        success, im = cap.retrieve()
+                        if success:
+                            self.imgs[i] = im
+                        else:
+                            LOGGER.warning("WARNING ⚠️ Video stream unresponsive, please check your IP camera connection.")
+                            self.imgs[i] = np.zeros_like(self.imgs[i])
+                            cap.open(stream)  # re-open stream if signal was lost
                 else:
-                    LOGGER.warning("WARNING ⚠️ Video stream unresponsive, please check your IP camera connection.")
-                    self.imgs[i] = np.zeros_like(self.imgs[i])
-                    cap.open(stream)  # re-open stream if signal was lost
-            time.sleep(0.0)  # wait time
+                    print("video closed")
+                    time.sleep(60)
+                    cap.open(stream)
+                time.sleep(0.0)  # wait time
+        finally:
+            if self.cap:
+                self.cap.release();
 
     def __iter__(self):
         """Resets and returns the iterator for iterating over video frames or images in a dataset."""

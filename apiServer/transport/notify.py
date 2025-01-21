@@ -7,7 +7,7 @@ import json
  
 data_queue = queue.Queue()
 
-notify_url = "http://172.21.73.123:8080"
+notify_url = "http://127.0.0.1:8080"
 if os.getenv("NOTIFY_URL") is not None:
     notify_url = os.getenv("NOTIFY_URL")
  
