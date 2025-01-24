@@ -57,7 +57,7 @@ def get_detection(detect_id):
     dt = detection_map.get(detect_id, None)
     return dt
  
-def is_timestamp_more_than_minutes(timestamp_end, timestamp_start, interval):
+def is_timestamp_more_than_second(timestamp_end, timestamp_start, interval):
     diff = timestamp_end - timestamp_start
     return diff > interval
 
@@ -353,7 +353,7 @@ class detection:
                         else:  # 'stream'
                             endTime = datetime.now()
                             
-                            if vid_path[i] == None or is_timestamp_more_than_minutes(int(endTime.timestamp()), int(standardTime.timestamp()), 60*1):  # new video
+                            if vid_path[i] == None or is_timestamp_more_than_second(int(endTime.timestamp()), int(standardTime.timestamp()), 60*1):  # new video
                                 standardTime = endTime
                                 time_str = endTime.strftime("%y-%m-%d-%H-%M-%S")
                                 save_path = str(save_dir / time_str)
@@ -396,7 +396,7 @@ class detection:
                         notify.push_notify_msg({"type": "object_detect", "data": json.dumps(notify_data), "image": image_base64, "id": self.detect_id, "name": self.name, "videoFileName": saveVideoFileName})
                         self.is_report = False
                     else:
-                        if is_timestamp_more_than_minutes(int(detect_report_time.timestamp()), int(detect_start_time.timestamp()), 60*10):
+                        if is_timestamp_more_than_second(int(detect_report_time.timestamp()), int(detect_start_time.timestamp()), 60*10):
                             detect_start_time = detect_report_time
                             self.is_report = True
                
@@ -410,7 +410,7 @@ class detection:
             # push hearbeat
 
             hearbeat_report_time = datetime.now()
-            if is_timestamp_more_than_minutes(int(hearbeat_report_time.timestamp()), int(hearbeat_start_time.timestamp()), 30):
+            if is_timestamp_more_than_second(int(hearbeat_report_time.timestamp()), int(hearbeat_start_time.timestamp()), 30):
                 hearbeat_start_time = hearbeat_report_time
                 notify.push_hearbeat_msg(self.detect_id) 
             if self.detect_stop:
