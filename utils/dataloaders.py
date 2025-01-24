@@ -36,9 +36,9 @@ from utils.augmentations import (
     mixup,
     random_perspective,
 )
+from logger import logger as LOGGER
 from utils.general import (
     DATASETS_DIR,
-    LOGGER,
     NUM_THREADS,
     TQDM_BAR_FORMAT,
     check_dataset,
@@ -507,7 +507,6 @@ class LoadStreams:
             self.threads[i] = Thread(target=self.update, args=([i, cap, s]), daemon=True)
             LOGGER.info(f"{st} Success ({self.frames[i]} frames {w}x{h} at {self.fps[i]:.2f} FPS)")
             self.threads[i].start()
-        LOGGER.info("")  # newline
 
         # check for common shapes
         s = np.stack([letterbox(x, img_size, stride=stride, auto=auto)[0].shape for x in self.imgs])
@@ -522,23 +521,20 @@ class LoadStreams:
         n, f = 0, self.frames[i]  # frame number, frame array
         try:
             while  n < f and not self.detect_stop:
-                if cap.isOpened():
-                    n += 1
-                    cap.grab()  # .read() = .grab() followed by .retrieve()
-                    if n % self.vid_stride == 0:
-                        success, im = cap.retrieve()
-                        if success:
-                            self.imgs[i] = im
-                        else:
-                            LOGGER.warning("WARNING ⚠️ Video stream unresponsive, please check your IP camera connection.")
-                            self.imgs[i] = np.zeros_like(self.imgs[i])
-                            cap.open(stream)  # re-open stream if signal was lost
-                else:
-                    print("video closed")
-                    time.sleep(60)
-                    cap.open(stream)
+                n += 1
+                cap.grab()  # .read() = .grab() followed by .retrieve()
+                if n % self.vid_stride == 0:
+                    success, im = cap.retrieve()
+                    if success:
+                        self.imgs[i] = im
+                    else:
+                        LOGGER.error("WARNING ⚠️ Video stream unresponsive, please check your IP camera connection.")
+                        self.imgs[i] = np.zeros_like(self.imgs[i])
+                        time.sleep(30)
+                        cap.open(stream)  # re-open stream if signal was lost
                 time.sleep(0.0)  # wait time
         finally:
+            print("video closed")
             if self.cap:
                 self.cap.release();
 
@@ -552,7 +548,7 @@ class LoadStreams:
         done.
         """
         self.count += 1
-        if not all(x.is_alive() for x in self.threads) or cv2.waitKey(1) == ord("q"):  # q to quit
+        if not all(x.is_alive() for x in self.threads) or cv2.waitKey(1) == ord("q") or self.detect_stop:  # q to quit
             cv2.destroyAllWindows()
             raise StopIteration
 
@@ -563,7 +559,6 @@ class LoadStreams:
             im = np.stack([letterbox(x, self.img_size, stride=self.stride, auto=self.auto)[0] for x in im0])  # resize
             im = im[..., ::-1].transpose((0, 3, 1, 2))  # BGR to RGB, BHWC to BCHW
             im = np.ascontiguousarray(im)  # contiguous
-
         return self.sources, im, im0, None, ""
 
     def __len__(self):

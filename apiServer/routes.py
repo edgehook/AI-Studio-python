@@ -1,7 +1,6 @@
 from flask import Blueprint, jsonify, request, Flask
 from apiServer.detection import detect
 from apiServer.utils import responce
-from apiServer.transport import websocket
 from flask_cors import CORS
 
 bp = Blueprint('main', __name__)
@@ -26,6 +25,11 @@ def start_detect():
     print(f"weight:{weight}, source:{source}, id: {id}, project:{project}, labels:{labels}, thres: {thres}")
     detect_region = json["detectPoints"]
     print(detect_region)
+    base64Img = detect.get_camera_screen(source)
+    if base64Img == "":
+        result = responce.result(500, "error", "Camera open error")
+        return jsonify(result), 500
+
     dt = detect.create_detection(weights=weight, source = source, project = project, labels = labels, name = name, detect_id= id, detect_region= detect_region, thres=thres)
     dt.start_detect()
     result = responce.result(200, "success")
@@ -42,18 +46,9 @@ def stop_detect():
     result = responce.result(200, "success")
     return jsonify(result), 200
 
-@bp.route('/v1/detect/result/<detect_id>', methods=["GET"])
-def get_detect_result(detect_id):
-    dt = detect.get_detection(detect_id)
-    msg = ""
-    if dt is not None:
-        msg = dt.image_base64
-    return msg, 200
-
 @bp.route('/v1/camera/screen', methods=["GET"])
 def get_camera_screen():
     source = request.args.get("source")
     base64Img = detect.get_camera_screen(source)
-    print(base64Img)
     result = responce.result(200, "success", base64Img)
     return jsonify(result), 200

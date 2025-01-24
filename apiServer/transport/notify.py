@@ -3,7 +3,7 @@ import queue
 import requests
 import time
 import os
-import json
+from logger import logger as LOGGER
  
 data_queue = queue.Queue()
 
@@ -31,14 +31,10 @@ def notify():
             else:
                 id = msg.get("data",  "")
                 api_url = f"{notify_url}/v1/aiStudio/hearbeat/{id}"
-                print(f"apiUrl {api_url}")
                 response = requests.post(api_url)
             response.raise_for_status()
-            print(f"Status Code: {response.status_code}")
-            print(f"Response JSON: {response.json()}")
-            print(f"Successfully sent data")
         except requests.exceptions.RequestException as e:
-            print(f"Failed to send, Error: {e}")
+            LOGGER.error(f"Failed to send, Error: {e}")
         data_queue.task_done()
 
 worker = threading.Thread(target=notify)

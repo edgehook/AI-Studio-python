@@ -4,6 +4,7 @@ import threading
 from websockets.sync.server import serve
 from apiServer.detection import detect
 message_queue = queue.Queue()
+from logger import logger as LOGGER
  
 websocket_map = {}
 websocket_map_normal_key = "normal"
@@ -15,9 +16,8 @@ def push_msg(id, msg):
 def websocket_handler(websocket):
     
     path_str = websocket.request.path
-    print(f"websocket path: {path_str}")
+    # print(f"websocket path: {path_str}")
     path_array = path_str.split("/")
-    print(path_array)
     device_id=""
     if len(path_array) == 2:
         device_id = path_array[1]
@@ -39,10 +39,14 @@ def websocket_handler(websocket):
    
     websocket_map[device_id].add(websocket)
     try:
-        message = websocket.recv()
-        print(message)
+        while True:
+            message = websocket.recv()
+            # print(message)
+            if message == "closed":
+                websocket_map[device_id].remove(websocket)
+                break
     except Exception as e:
-        print(f"websocket closed path: {device_id}, exception: {e}")
+        LOGGER.error(f"websocket closed path: {device_id}, exception: {e}")
  
 def broadcast_messages():
     while True:
@@ -61,7 +65,7 @@ def broadcast_messages():
                             try:
                                 ws.send(msg)
                             except Exception as e:
-                                print(f"Failed to send message to {id}, exception: {e}")
+                                LOGGER.error(f"Failed to send message to {id}, exception: {e}")
                                 websocket_connections.remove(ws)
         except queue.Empty:
             continue
@@ -71,7 +75,7 @@ def broadcast_messages():
 def start_server():
     port = 8765
     with serve(websocket_handler, "0.0.0.0", port, close_timeout=60) as server:
-        print(f"start websocket server successful :{port}")
+        LOGGER.info(f"start websocket server successful :{port}")
         server.serve_forever()
 
 def run_server():
@@ -79,7 +83,7 @@ def run_server():
     websocket_thread.setDaemon(True)
     websocket_thread.start()
 
-    thread_count = 5
+    thread_count = 3
     for i in range(thread_count):
         broadcast_thread = threading.Thread(target=broadcast_messages) 
         broadcast_thread.daemon = True 

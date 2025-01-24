@@ -4,11 +4,11 @@ import platform
 import sys
 import threading
 from pathlib import Path
+import time
 
 import numpy as np
 import torch
 import base64
-import subprocess
 FILE = Path(__file__).resolve()
 ROOT = FILE.parents[0]  # YOLOv5 root directory
 if str(ROOT) not in sys.path:
@@ -19,8 +19,8 @@ from ultralytics.utils.plotting import Annotator, colors, save_one_box
 
 from models.common import DetectMultiBackend
 from utils.dataloaders import IMG_FORMATS, VID_FORMATS, LoadImages, LoadScreenshots, LoadStreams, gstreamer_pipeline
+from logger import logger as LOGGER
 from utils.general import (
-    LOGGER,
     Profile,
     check_file,
     check_img_size,
@@ -38,17 +38,19 @@ from apiServer.transport import notify, websocket
 
 detection_map = {}
 def create_detection(weights, source, labels, detect_id, thres=0.25, view_img=False, detect_region=None, project="../../runs/detect", name="exp"):
-    dt= detection(
-        weights= weights, 
-        source= source, 
-        thres= thres, 
-        view_img= view_img, 
-        project= project, 
-        name= name,
-        labels=labels, 
-        detect_id= detect_id,
-        detect_region= detect_region)
-    detection_map[detect_id] = dt
+    dt = detection_map.get(detect_id, None)
+    if dt is None:
+        dt= detection(
+            weights= weights, 
+            source= source, 
+            thres= thres, 
+            view_img= view_img, 
+            project= project, 
+            name= name,
+            labels=labels, 
+            detect_id= detect_id,
+            detect_region= detect_region)
+        detection_map[detect_id] = dt
     return dt
 
 def get_detection(detect_id):
@@ -92,14 +94,13 @@ class detection:
         self.labels = labels
         self.detect_stop = False
         self.is_report = True
-        self.image_base64 = ""
         self.detect_id = detect_id
         self.detect_region = detect_region
         self.is_detect = True
     def start_detect(self):
         if self.thread is None or not self.thread.is_alive():
             kwargs = { "conf_thres": self.conf_thres}
-            self.thread = threading.Thread(target=self.detect, kwargs=kwargs)
+            self.thread = threading.Thread(target=self.detect, kwargs=kwargs, daemon=True)
             self.thread.start()
             
         else:
@@ -173,6 +174,9 @@ class detection:
         saveVideoFileName = ""
         for path, im, im0s, vid_cap, s in dataset:
             #detect_region: [[x,y], [x1,y1], [x2,y2], [x3,y3]]
+            if np.all(im0s[0] == 0):
+                time.sleep(30)
+                continue
             if self.is_detect and self.weights:
                 if self.detect_region and len(self.detect_region) >0:
                     w = self.detect_region[0][0]
@@ -376,11 +380,11 @@ class detection:
                 if websocket_connections:
                     success, encoded_image = cv2.imencode('.jpg', im0)
                     if success:
-                        image_base64 =base64.b64encode(encoded_image.tobytes()).decode('utf-8')
-                        websocket.push_msg(self.detect_id, image_base64)
+                        # image_base64 =base64.b64encode(encoded_image.tobytes()).decode('utf-8')
+                        websocket.push_msg(self.detect_id, encoded_image.tobytes())
                     
                 # Print time (inference-only)
-                LOGGER.info(f"{s}{'' if len(det) else '(no detections), '}{saveVideoFileName}")
+                print(f"{s}{'' if len(det) else '(no detections), '}{saveVideoFileName}")
                 detect_report_time = datetime.now()
                 # push nofity msg
                 if len(notify_data):
@@ -401,22 +405,23 @@ class detection:
                 im0 = cv2.resize(im0s[0], (w // 5, h // 5))
                 success, encoded_image = cv2.imencode('.jpg', im0)
                 if success:
-                    image_base64 =base64.b64encode(encoded_image.tobytes()).decode('utf-8')
-                    websocket.push_msg(self.detect_id, image_base64)
+                    # image_base64 =base64.b64encode(encoded_image.tobytes()).decode('utf-8')
+                    websocket.push_msg(self.detect_id, encoded_image.tobytes())
             # push hearbeat
+
             hearbeat_report_time = datetime.now()
             if is_timestamp_more_than_minutes(int(hearbeat_report_time.timestamp()), int(hearbeat_start_time.timestamp()), 30):
                 hearbeat_start_time = hearbeat_report_time
                 notify.push_hearbeat_msg(self.detect_id) 
             if self.detect_stop:
+                dataset.detect_stop = True
+                del detection_map[self.detect_id]
                 if len(vid_writer) >0:
                     for item in vid_writer:
                         item.release()
                 if vid_cap:
                     vid_cap.release()
-                dataset.detect_stop = True
-                del detection_map[self.detect_id]
-                return 
+                return
         # Print results
         t = tuple(x.t / seen * 1e3 for x in dt)  # speeds per image
         LOGGER.info(f"Speed: %.1fms pre-process, %.1fms inference, %.1fms NMS per image at shape {(1, 3, *imgsz)}" % t)

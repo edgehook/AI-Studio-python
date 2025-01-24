@@ -2,10 +2,10 @@
 import os
 from . import routes
 from apiServer.transport.websocket import run_server
-from apiServer.test import run
+# from apiServer.test import run
 
 def run_api_server():
-    run()
+    # run()
     run_server()
     port = 8090
     if os.getenv('PORT') is not None:
