@@ -1,7 +1,11 @@
+import os
+import random
+import string
 from flask import Blueprint, jsonify, request, Flask
 from apiServer.detection import detect
 from apiServer.utils import responce
 from flask_cors import CORS
+from apiServer.test import face_attendance
 
 bp = Blueprint('main', __name__)
 app = Flask(__name__)
@@ -51,4 +55,34 @@ def get_camera_screen():
     source = request.args.get("source")
     base64Img = detect.get_camera_screen(source)
     result = responce.result(200, "success", base64Img)
+    return jsonify(result), 200
+
+@bp.route('/v1/camera/video/screen', methods=["POST"])
+def get_camera_video_screen():
+    if 'video' not in request.files:
+        return "No file part", 400
+
+    file = request.files['video']
+
+    if file.filename == '':
+        return "No selected file", 400
+
+    random_dir = ''.join(random.choice(string.ascii_letters + string.digits) for _ in range(10))
+    save_path = os.path.join(os.getcwd(), random_dir)
+    os.makedirs(save_path, exist_ok=True)
+
+    file_path = os.path.join(save_path, file.filename)
+    file.save(file_path)
+    base64Img = detect.get_camera_screen(file_path)
+    os.remove(file_path)
+    os.rmdir(save_path)
+    result = responce.result(200, "success",base64Img)
+    return jsonify(result), 200
+
+@bp.route('/v1/detect/face', methods=["POST"])
+def face_detect():
+    json = request.get_json()
+    source = json["source"]
+    face_attendance(source) 
+    result = responce.result(200, "success")
     return jsonify(result), 200
