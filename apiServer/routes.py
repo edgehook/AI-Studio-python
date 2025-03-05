@@ -5,8 +5,6 @@ from flask import Blueprint, jsonify, request, Flask
 from apiServer.detection import detect
 from apiServer.utils import responce
 from flask_cors import CORS
-from apiServer.test import face_attendance
-
 bp = Blueprint('main', __name__)
 app = Flask(__name__)
 cors = CORS(app, resources={
@@ -17,7 +15,7 @@ cors = CORS(app, resources={
     }
 })
 @bp.route('/v1/detect', methods=["POST"])
-def start_detect():
+def run_detect():
     json = request.get_json()
     weight = json["weight"]
     source = json["source"]
@@ -26,16 +24,18 @@ def start_detect():
     labels = json["labels"]
     name = json["name"]
     thres = json["thres"]
-    print(f"weight:{weight}, source:{source}, id: {id}, project:{project}, labels:{labels}, thres: {thres}")
+    tp= json["tp"]
+    duration = json["duration"]
+    print(f"weight:{weight}, source:{source}, id: {id}, project:{project}, labels:{labels}, thres: {thres}, type: {tp}, duration: {duration}")
     detect_region = json["detectPoints"]
     print(detect_region)
-    base64Img = detect.get_camera_screen(source)
+    base64Img = detect.get_camera_screen(source=source, tp=tp)
     if base64Img == "":
         result = responce.result(500, "error", "Camera open error")
         return jsonify(result), 500
 
     dt = detect.create_detection(weights=weight, source = source, project = project, labels = labels, name = name, detect_id= id, detect_region= detect_region, thres=thres)
-    dt.start_detect()
+    dt.start_detect(tp, duration=duration)
     result = responce.result(200, "success")
     return jsonify(result), 200
 
@@ -53,7 +53,8 @@ def stop_detect():
 @bp.route('/v1/camera/screen', methods=["GET"])
 def get_camera_screen():
     source = request.args.get("source")
-    base64Img = detect.get_camera_screen(source)
+    tp = request.args.get("type")
+    base64Img = detect.get_camera_screen(source, tp= tp)
     result = responce.result(200, "success", base64Img)
     return jsonify(result), 200
 
@@ -73,16 +74,36 @@ def get_camera_video_screen():
 
     file_path = os.path.join(save_path, file.filename)
     file.save(file_path)
-    base64Img = detect.get_camera_screen(file_path)
+    base64Img = detect.get_camera_screen(file_path, tp="video")
     os.remove(file_path)
     os.rmdir(save_path)
     result = responce.result(200, "success",base64Img)
     return jsonify(result), 200
 
-@bp.route('/v1/detect/face', methods=["POST"])
-def face_detect():
+
+
+@bp.route('/v1/detect/monitor', methods=["POST"])
+def get_detect_monitor():
     json = request.get_json()
-    source = json["source"]
-    face_attendance(source) 
-    result = responce.result(200, "success")
+    detectIds = json["detectIds"]
+    
+    monitor_array = []
+    if detectIds is not None:
+        try: 
+            # detectIds = json.loads(ids)
+            for detectId in detectIds:
+                monitor_map = {}
+                dt = detect.get_detection(detect_id=detectId)
+                if dt is not None:
+                    detect_time = dt.detect_time
+                    monitor_map["detectId"] = detectIds
+                    monitor_map["detectTime"] = detect_time
+                    monitor_array.append(monitor_map)
+        except json.JSONDecodeError as e:
+            result = responce.result(500, "error", "JSON error")
+            return jsonify(result), 500
+    result = responce.result(200, "success",monitor_array)
     return jsonify(result), 200
+
+
+

@@ -36,6 +36,9 @@ from datetime import datetime, timedelta
 from apiServer.transport import notify, websocket
 
 
+lock = threading.Lock()
+
+
 detection_map = {}
 def create_detection(weights, source, labels, detect_id, thres=0.25, view_img=False, detect_region=None, project="../../runs/detect", name="exp"):
     dt = detection_map.get(detect_id, None)
@@ -61,12 +64,12 @@ def is_timestamp_more_than_second(timestamp_end, timestamp_start, interval):
     diff = timestamp_end - timestamp_start
     return diff > interval
 
-def get_camera_screen(source):
-    print(f"source: {source}")
+def get_camera_screen(source, tp):
+    print(f"source: {source}, type: {tp}")
     s = eval(source) if source.isnumeric() else source  # i.e. s = '0' local webcam
     if type(s) == int:
         print('[gstreamer] ', gstreamer_pipeline(sensor_id=s, capture_width=1920, capture_height=1080))
-        cap = cv2.VideoCapture(gstreamer_pipeline(sensor_id=s, capture_width=1920, capture_height=1080), cv2.CAP_GSTREAMER)
+        cap = cv2.VideoCapture(gstreamer_pipeline(sensor_id=s, capture_width=1920, capture_height=1080, tp=tp), cv2.CAP_GSTREAMER)
     else:
         print('[gstreamer] ', gstreamer_pipeline())
         cap = cv2.VideoCapture(s)
@@ -97,9 +100,11 @@ class detection:
         self.detect_id = detect_id
         self.detect_region = detect_region
         self.is_detect = True
-    def start_detect(self):
+        self.detect_time = ""
+    def start_detect(self, tp, duration):
+        nosave = not duration
         if self.thread is None or not self.thread.is_alive():
-            kwargs = { "conf_thres": self.conf_thres}
+            kwargs = { "conf_thres": self.conf_thres, "tp": tp,  "nosave": nosave}
             self.thread = threading.Thread(target=self.detect, kwargs=kwargs, daemon=True)
             self.thread.start()
             
@@ -114,7 +119,7 @@ class detection:
         imgsz=(640, 640),  # inference size (height, width)
         conf_thres=0.25,  # confidence threshold
         iou_thres=0.45,  # NMS IOU threshold
-        max_det=1000,  # maximum detections per image
+        max_det=100,  # maximum detections per image
         device="",  # cuda device, i.e. 0 or 0,1,2,3 or cpu
         view_img=False,  # show results
 
@@ -130,10 +135,11 @@ class detection:
         half=False,  # use FP16 half-precision inference
         dnn=False,  # use OpenCV DNN for ONNX inference
         vid_stride=1,  # video frame-rate stride
+        tp = None,
     ):
         
         self.source = str(self.source).lstrip()
-        save_img = not nosave and not self.source.endswith(".txt")  # save inference images
+        save_img = not nosave  # save inference images
         is_file = Path(self.source).suffix[1:] in (IMG_FORMATS + VID_FORMATS)
         is_url = self.source.lower().startswith(("rtsp://", "rtmp://", "http://", "https://"))
         webcam = self.source.isnumeric() or self.source.endswith(".streams") or (is_url and not is_file)
@@ -156,7 +162,7 @@ class detection:
         bs = 1  # batch_size
         if webcam:
             # view_img = check_imshow(warn=True)
-            dataset = LoadStreams(self.source, img_size=imgsz, stride=stride, auto=pt, vid_stride=vid_stride)
+            dataset = LoadStreams(self.source, img_size=imgsz, stride=stride, auto=pt, vid_stride=vid_stride, tp= tp)
             bs = len(dataset)
         elif screenshot:
             dataset = LoadScreenshots(self.source, img_size=imgsz, stride=stride, auto=pt)
@@ -174,7 +180,7 @@ class detection:
         saveVideoFileName = ""
         for path, im, im0s, vid_cap, s in dataset:
             #detect_region: [[x,y], [x1,y1], [x2,y2], [x3,y3]]
-            if np.all(im0s[0] == 0):
+            if np.all(im0s[0] == 0 )and webcam:
                 time.sleep(30)
                 continue
             if self.is_detect and self.weights:
@@ -224,18 +230,26 @@ class detection:
                         ims = torch.chunk(im, im.shape[0], 0)
 
                 # Inference
-                with dt[1]:
-                    visualize = increment_path(save_dir / Path(path).stem, mkdir=True) if visualize else False
-                    if model.xml and im.shape[0] > 1:
-                        pred = None
-                        for image in ims:
-                            if pred is None:
-                                pred = model(image, augment=augment, visualize=visualize).unsqueeze(0)
-                            else:
-                                pred = torch.cat((pred, model(image, augment=augment, visualize=visualize).unsqueeze(0)), dim=0)
-                        pred = [pred, None]
-                    else:
-                        pred = model(im, augment=augment, visualize=visualize)
+                try:
+                    lock.acquire()
+                    with dt[1]:
+                        visualize = increment_path(save_dir / Path(path).stem, mkdir=True) if visualize else False
+                        start_time = time.time()
+                        if model.xml and im.shape[0] > 1:
+                            pred = None
+                            for image in ims:
+                                if pred is None:
+                                    pred = model(image, augment=augment, visualize=visualize).unsqueeze(0)
+                                else:
+                                    pred = torch.cat((pred, model(image, augment=augment, visualize=visualize).unsqueeze(0)), dim=0)
+                            pred = [pred, None]
+                        else:
+                            pred = model(im, augment=augment, visualize=visualize)
+                        end_time = time.time()
+                        elapsed_time = end_time - start_time
+                        self.detect_time = f"{elapsed_time:.4f}"
+                finally:
+                    lock.release()
                 # NMS
                 with dt[2]:
                     pred = non_max_suppression(pred, conf_thres, iou_thres, classes, agnostic_nms, max_det=max_det)      
@@ -308,20 +322,16 @@ class detection:
                             confidence = float(conf)
                             confidence_str = f"{confidence:.2f}"
                             if self.labels is not None and isinstance(self.labels, list) and len(self.labels) >0:
-                                for l in self.labels:
-                                    # LOGGER.info("label:"+l+"## detect name:"+names[int(cls)])
-                                    if l == label:
-                                        if save_img or view_img:  # Add bbox to image
-                                            c = int(cls)  # integer class
-                                            label = None if hide_labels else (names[c] if hide_conf else f"{names[c]} {conf:.2f}")
-                                            annotator.box_label(xyxy, label, color=colors(c, True))
-
-
-                            else:
-                                if save_img  or view_img:  # Add bbox to image
+                                if l == label:
                                     c = int(cls)  # integer class
                                     label = None if hide_labels else (names[c] if hide_conf else f"{names[c]} {conf:.2f}")
                                     annotator.box_label(xyxy, label, color=colors(c, True))
+
+
+                            else:
+                                c = int(cls)  # integer class
+                                label = None if hide_labels else (names[c] if hide_conf else f"{names[c]} {conf:.2f}")
+                                annotator.box_label(xyxy, label, color=colors(c, True))
                     # Stream results
                     im0 = annotator.result()
                     if view_img:
@@ -332,24 +342,9 @@ class detection:
                         cv2.imshow(str(p), im0)
                         cv2.waitKey(1)  # 1 millisecond
 
-                    # Save results (image with detections)
                     if save_img:
                         if dataset.mode == "image":
                             cv2.imwrite(save_path, im0)
-                        if dataset.mode == "video":
-                            if vid_path[i] != save_path:  # new video
-                                vid_path[i] = save_path
-                                if isinstance(vid_writer[i], cv2.VideoWriter):
-                                    vid_writer[i].release()  # release previous video writer
-                                if vid_cap:  # video
-                                    fps = vid_cap.get(cv2.CAP_PROP_FPS)
-                                    w = int(vid_cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-                                    h = int(vid_cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-                                else:  # stream
-                                    fps, w, h = 30, im0.shape[1], im0.shape[0]
-                                save_path = str(Path(save_path).with_suffix(".mp4"))  # force *.mp4 suffix on results videos
-                                vid_writer[i] = cv2.VideoWriter(save_path, cv2.VideoWriter_fourcc(*"mp4v"), fps, (w, h))
-                            vid_writer[i].write(im0)
                         else:  # 'stream'
                             endTime = datetime.now()
                             
@@ -373,9 +368,6 @@ class detection:
                                 im0 = cv2.resize(im0, (w // 10, h // 10))
 
                             vid_writer[i].write(im0)
-                detectImgPath =  str(save_dir / "detect.jpg")
-                cv2.imwrite(detectImgPath, im0)
-                # print(websocket.websocket_map)
                 websocket_connections = websocket.websocket_map.get(self.detect_id, None) 
                 if websocket_connections:
                     success, encoded_image = cv2.imencode('.jpg', im0)
@@ -408,7 +400,6 @@ class detection:
                     # image_base64 =base64.b64encode(encoded_image.tobytes()).decode('utf-8')
                     websocket.push_msg(self.detect_id, encoded_image.tobytes())
             # push hearbeat
-
             hearbeat_report_time = datetime.now()
             if is_timestamp_more_than_second(int(hearbeat_report_time.timestamp()), int(hearbeat_start_time.timestamp()), 30):
                 hearbeat_start_time = hearbeat_report_time
@@ -418,7 +409,8 @@ class detection:
                 del detection_map[self.detect_id]
                 if len(vid_writer) >0:
                     for item in vid_writer:
-                        item.release()
+                        if item:
+                            item.release()
                 if vid_cap:
                     vid_cap.release()
                 return
