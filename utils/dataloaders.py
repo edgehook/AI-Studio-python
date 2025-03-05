@@ -79,10 +79,10 @@ def gstreamer_pipeline(
     display_height=768,
     framerate=30,
     flip_method=0,
-):
-    return (
-        "nvv4l2camerasrc device=/dev/video%d ! video/x-raw(memory:NVMM), format=(string)UYVY, width=(int)%d, height=(int)%d, framerate=(fraction)%d/1 ! nvvidconv flip-method=%d ! video/x-raw, width=(int)%d, height=(int)%d, format=(string)BGRx ! videoconvert ! video/x-raw, format=(string)BGR ! appsink"
-        % (
+    tp= None,
+):  
+    command = ("nvv4l2camerasrc device=/dev/video%d ! video/x-raw(memory:NVMM), format=(string)UYVY, width=(int)%d, height=(int)%d, framerate=(fraction)%d/1 ! nvvidconv flip-method=%d ! video/x-raw, width=(int)%d, height=(int)%d, format=(string)BGRx ! videoconvert ! video/x-raw, format=(string)BGR ! appsink"
+               % (
             sensor_id,
             capture_width,
             capture_height,
@@ -90,8 +90,18 @@ def gstreamer_pipeline(
             flip_method,
             display_width,
             display_height,
+        ))
+    if tp == "usb":
+        command = (
+            "v4l2src device=/dev/video%d ! image/jpeg, width=(int)%d, height=(int)%d,framerate=(fraction)%d/1 ! jpegdec ! videoconvert ! appsink"
+            %(
+                sensor_id,
+                capture_width,
+                capture_height,
+                framerate,
+            )
         )
-    )
+    return command
 def get_hash(paths):
     """Generates a single SHA256 hash for a list of file or directory paths by combining their sizes and paths."""
     size = sum(os.path.getsize(p) for p in paths if os.path.exists(p))  # sizes
@@ -449,7 +459,7 @@ class LoadImages:
 
 class LoadStreams:
     # YOLOv5 streamloader, i.e. `python detect.py --source 'rtsp://example.com/media.mp4'  # RTSP, RTMP, HTTP streams`
-    def __init__(self, sources="file.streams", img_size=640, stride=32, auto=True, transforms=None, vid_stride=1):
+    def __init__(self, sources="file.streams", img_size=640, stride=32, auto=True, transforms=None, vid_stride=1, tp=None):
         """Initializes a stream loader for processing video streams with YOLOv5, supporting various sources including
         YouTube.
         """
@@ -478,8 +488,8 @@ class LoadStreams:
                 assert not is_kaggle(), "--source 0 webcam unsupported on Kaggle. Rerun command in a local environment."
             if type(s) == int:
 
-                print('[gstreamer] ', gstreamer_pipeline(sensor_id=s, capture_width=1920, capture_height=1080))
-                cap = cv2.VideoCapture(gstreamer_pipeline(sensor_id=s, capture_width=1920, capture_height=1080), cv2.CAP_GSTREAMER)
+                print('[gstreamer] ', gstreamer_pipeline(sensor_id=s, capture_width=1920, capture_height=1080, tp=tp))
+                cap = cv2.VideoCapture(gstreamer_pipeline(sensor_id=s, capture_width=1920, capture_height=1080, tp=tp), cv2.CAP_GSTREAMER)
             else:
                 print('[gstreamer] ', gstreamer_pipeline())
                 cap = cv2.VideoCapture(s)

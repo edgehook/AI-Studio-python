@@ -27,7 +27,6 @@ Usage - formats:
                                  yolov5s_edgetpu.tflite     # TensorFlow Edge TPU
                                  yolov5s_paddle_model       # PaddlePaddle
 """
-from app import create_app
 import argparse
 import csv
 import os
@@ -374,6 +373,5 @@ def main(opt):
 
 
 if __name__ == "__main__":
-    create_app()
     opt = parse_opt()
     main(opt)
