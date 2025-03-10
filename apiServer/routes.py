@@ -2,6 +2,7 @@ import os
 import random
 import string
 from flask import Blueprint, jsonify, request, Flask
+import torch
 from apiServer.detection import detect
 from apiServer.utils import responce
 from flask_cors import CORS
@@ -28,9 +29,7 @@ def run_detect():
     duration = json["duration"]
     print(f"weight:{weight}, source:{source}, id: {id}, project:{project}, labels:{labels}, thres: {thres}, type: {tp}, duration: {duration}")
     detect_region = json["detectPoints"]
-    print(detect_region)
-    base64Img = detect.get_camera_screen(source=source, tp=tp)
-    if base64Img == "":
+    if not detect.camera_is_available(source=source, tp=tp):
         result = responce.result(500, "error", "Camera open error")
         return jsonify(result), 500
 
@@ -49,6 +48,39 @@ def stop_detect():
     
     result = responce.result(200, "success")
     return jsonify(result), 200
+@bp.route('/v1/detect/monitor', methods=["POST"])
+def get_detect_monitor():
+    json = request.get_json()
+    detectIds = json["detectIds"]
+    
+    monitor_array = []
+    if detectIds is not None:
+        try: 
+            # detectIds = json.loads(ids)
+            for detectId in detectIds:
+                monitor_map = {}
+                dt = detect.get_detection(detect_id=detectId)
+                if dt is not None:
+                    detect_time = dt.detect_time
+                    monitor_map["detectId"] = detectId
+                    monitor_map["detectTime"] = detect_time
+                    monitor_map["name"] = dt.name
+                    monitor_array.append(monitor_map)
+        except json.JSONDecodeError as e:
+            result = responce.result(500, "error", "JSON error")
+            return jsonify(result), 500
+    result = responce.result(200, "success",monitor_array)
+    return jsonify(result), 200
+@bp.route('/v1/detect/cuda', methods=["POST"])
+def get_cuda_version():
+    cuda_version = ""
+    if torch.cuda.is_available():
+        cuda_version = torch.version.cuda
+    else:
+        print("No available CUDA device was detected。")
+    result = responce.result(200, "success",cuda_version)
+    return jsonify(result), 200
+
 
 @bp.route('/v1/camera/screen', methods=["GET"])
 def get_camera_screen():
@@ -82,28 +114,7 @@ def get_camera_video_screen():
 
 
 
-@bp.route('/v1/detect/monitor', methods=["POST"])
-def get_detect_monitor():
-    json = request.get_json()
-    detectIds = json["detectIds"]
-    
-    monitor_array = []
-    if detectIds is not None:
-        try: 
-            # detectIds = json.loads(ids)
-            for detectId in detectIds:
-                monitor_map = {}
-                dt = detect.get_detection(detect_id=detectId)
-                if dt is not None:
-                    detect_time = dt.detect_time
-                    monitor_map["detectId"] = detectIds
-                    monitor_map["detectTime"] = detect_time
-                    monitor_array.append(monitor_map)
-        except json.JSONDecodeError as e:
-            result = responce.result(500, "error", "JSON error")
-            return jsonify(result), 500
-    result = responce.result(200, "success",monitor_array)
-    return jsonify(result), 200
+
 
 
 

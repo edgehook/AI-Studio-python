@@ -64,6 +64,19 @@ def is_timestamp_more_than_second(timestamp_end, timestamp_start, interval):
     diff = timestamp_end - timestamp_start
     return diff > interval
 
+def camera_is_available(source, tp):
+    print(f"source: {source}, type: {tp}")
+    s = eval(source) if source.isnumeric() else source  # i.e. s = '0' local webcam
+    if type(s) == int:
+        print('[gstreamer] ', gstreamer_pipeline(sensor_id=s, capture_width=1920, capture_height=1080))
+        cap = cv2.VideoCapture(gstreamer_pipeline(sensor_id=s, capture_width=1920, capture_height=1080, tp=tp), cv2.CAP_GSTREAMER)
+    else:
+        print('[gstreamer] ', gstreamer_pipeline())
+        cap = cv2.VideoCapture(s)
+    if cap.isOpened():
+        return True
+    return False
+
 def get_camera_screen(source, tp):
     print(f"source: {source}, type: {tp}")
     s = eval(source) if source.isnumeric() else source  # i.e. s = '0' local webcam
@@ -78,7 +91,7 @@ def get_camera_screen(source, tp):
         cap.release()
         if success:
             h, w, _ = im.shape
-            im0 = cv2.resize(im, (w // 5, h // 5))
+            im0 = cv2.resize(im, (w // 2, h // 2))
             success, encoded_image = cv2.imencode('.jpg', im0)
             if success:
                 image_base64 =base64.b64encode(encoded_image.tobytes()).decode('utf-8')
@@ -375,8 +388,7 @@ class detection:
                         # image_base64 =base64.b64encode(encoded_image.tobytes()).decode('utf-8')
                         websocket.push_msg(self.detect_id, encoded_image.tobytes())
                     
-                # Print time (inference-only)
-                print(f"{s}{'' if len(det) else '(no detections), '}{saveVideoFileName}")
+                # print(f"{s}{'' if len(det) else '(no detections), '}{saveVideoFileName}")
                 detect_report_time = datetime.now()
                 # push nofity msg
                 if len(notify_data):
