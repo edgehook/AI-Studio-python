@@ -45,6 +45,8 @@ def stop_detect():
     dt = detect.get_detection(detect_id=id)
     if dt is not None:
         dt.stop_detect()
+    else:
+        print(f"detect is None, id={id}")
     
     result = responce.result(200, "success")
     return jsonify(result), 200
@@ -62,8 +64,10 @@ def get_detect_monitor():
                 dt = detect.get_detection(detect_id=detectId)
                 if dt is not None:
                     detect_time = dt.detect_time
+                    handle_time = dt.handle_time
                     monitor_map["detectId"] = detectId
                     monitor_map["detectTime"] = detect_time
+                    monitor_map["handleTime"] = handle_time
                     monitor_map["name"] = dt.name
                     monitor_array.append(monitor_map)
         except json.JSONDecodeError as e:
@@ -71,7 +75,7 @@ def get_detect_monitor():
             return jsonify(result), 500
     result = responce.result(200, "success",monitor_array)
     return jsonify(result), 200
-@bp.route('/v1/detect/cuda', methods=["POST"])
+@bp.route('/v1/detect/cuda', methods=["GET"])
 def get_cuda_version():
     cuda_version = ""
     if torch.cuda.is_available():

@@ -114,6 +114,7 @@ class detection:
         self.detect_region = detect_region
         self.is_detect = True
         self.detect_time = ""
+        self.handle_time = ""
     def start_detect(self, tp, duration):
         nosave = not duration
         if self.thread is None or not self.thread.is_alive():
@@ -193,6 +194,7 @@ class detection:
         saveVideoFileName = ""
         for path, im, im0s, vid_cap, s in dataset:
             #detect_region: [[x,y], [x1,y1], [x2,y2], [x3,y3]]
+            stime = time.time()
             if np.all(im0s[0] == 0 )and webcam:
                 time.sleep(30)
                 continue
@@ -411,6 +413,11 @@ class detection:
                 if success:
                     # image_base64 =base64.b64encode(encoded_image.tobytes()).decode('utf-8')
                     websocket.push_msg(self.detect_id, encoded_image.tobytes())
+            #create handle time
+           
+            etime = time.time()
+            handle_time = etime - stime
+            self.handle_time = f"{handle_time:.4f}"
             # push hearbeat
             hearbeat_report_time = datetime.now()
             if is_timestamp_more_than_second(int(hearbeat_report_time.timestamp()), int(hearbeat_start_time.timestamp()), 30):
