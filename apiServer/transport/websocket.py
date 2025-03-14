@@ -63,7 +63,7 @@ def broadcast_messages():
                     if websocket_connections:
                         for ws in list(websocket_connections):  
                             try:
-                                print(f"send msg by websocket:{id}")
+                                # print(f"send msg by websocket:{id}")
                                 ws.send(msg)
                             except Exception as e:
                                 LOGGER.error(f"Failed to send message to {id}, exception: {e}")

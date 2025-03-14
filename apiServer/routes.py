@@ -27,13 +27,23 @@ def run_detect():
     thres = json["thres"]
     tp= json["tp"]
     duration = json["duration"]
-    print(f"weight:{weight}, source:{source}, id: {id}, project:{project}, labels:{labels}, thres: {thres}, type: {tp}, duration: {duration}")
+    isDetect = json["isDetect"]
+    print(f"weight:{weight}, source:{source}, id: {id}, project:{project}, labels:{labels}, thres: {thres}, type: {tp}, duration: {duration}, isDetect: {isDetect}")
     detect_region = json["detectPoints"]
     if not detect.camera_is_available(source=source, tp=tp):
         result = responce.result(500, "error", "Camera open error")
         return jsonify(result), 500
 
-    dt = detect.create_detection(weights=weight, source = source, project = project, labels = labels, name = name, detect_id= id, detect_region= detect_region, thres=thres)
+    dt = detect.create_detection(
+        weights=weight, 
+        source = source, 
+        project = project, 
+        labels = labels, 
+        name = name, 
+        detect_id= id, 
+        detect_region= detect_region, 
+        thres=thres, 
+        isDetect=isDetect)
     dt.start_detect(tp, duration=duration)
     result = responce.result(200, "success")
     return jsonify(result), 200
@@ -64,6 +74,8 @@ def get_detect_monitor():
                 dt = detect.get_detection(detect_id=detectId)
                 if dt is not None:
                     detect_time = dt.detect_time
+                    if not detect_time:
+                        detect_time = 0
                     handle_time = dt.handle_time
                     monitor_map["detectId"] = detectId
                     monitor_map["detectTime"] = detect_time
