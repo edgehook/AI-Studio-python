@@ -368,6 +368,7 @@ class LoadImages:
         ni, nv = len(images), len(videos)
 
         self.img_size = img_size
+        self.detect_stop = False
         self.stride = stride
         self.files = images + videos
         self.nf = ni + nv  # number of files
@@ -392,7 +393,7 @@ class LoadImages:
 
     def __next__(self):
         """Advances to the next file in the dataset, raising StopIteration if at the end."""
-        if self.count == self.nf:
+        if self.detect_stop:
             raise StopIteration
         path = self.files[self.count]
 
@@ -406,7 +407,7 @@ class LoadImages:
                 self.count += 1
                 self.cap.release()
                 if self.count == self.nf:  # last video
-                    raise StopIteration
+                    self.count = 0
                 path = self.files[self.count]
                 self._new_video(path)
                 ret_val, im0 = self.cap.read()
