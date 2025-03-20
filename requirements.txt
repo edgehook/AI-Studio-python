@@ -1,11 +1,11 @@
-Flask>=2.0.1
+Flask==2.1.2
 Flask-Cors==2.1.0
 websockets>=11.0.1
 
 
 gitpython>=3.1.30
 matplotlib>=3.3
-numpy>=1.23.5
+numpy==1.23.5
 opencv-python>=4.1.1
 pillow>=10.3.0
 psutil  # system resources
