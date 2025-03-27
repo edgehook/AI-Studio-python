@@ -388,6 +388,10 @@ class detection:
                         #cv2.polylines(im0, [pts], True, (0, 0, 255), 3)
                     else:
                         p, s, im0, frame = path, '', im0s.copy(), getattr(dataset, 'frame', 0)
+                        for item in self.detect_region[1:]:
+                            wl = item[0] / w
+                            hl = item[1] / h
+                            np_array.append([int(im0.shape[1] * wl), int(im0.shape[0] * hl)])
                         cv2.putText(im0, "Detection Region", (int(np_array[0][0]), int(np_array[0][1] - 10)),
                                     cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 255), 2, cv2.LINE_AA)
                         pts = np.array(np_array, np.int32)  # pts4
