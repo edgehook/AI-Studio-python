@@ -484,29 +484,7 @@ class LoadStreams:
 
                 s = pafy.new(s).getbest(preftype="mp4").url  # YouTube URL
             s = eval(s) if s.isnumeric() else s  # i.e. s = '0' local webcam
-            if s == 0:
-                assert not is_colab(), "--source 0 webcam unsupported on Colab. Rerun command in a local environment."
-                assert not is_kaggle(), "--source 0 webcam unsupported on Kaggle. Rerun command in a local environment."
-            if type(s) == int:
-
-                print('[gstreamer] ', gstreamer_pipeline(sensor_id=s, capture_width=1920, capture_height=1080, tp=tp))
-                cap = cv2.VideoCapture(gstreamer_pipeline(sensor_id=s, capture_width=1920, capture_height=1080, tp=tp), cv2.CAP_GSTREAMER)
-            else:
-                print('[gstreamer] ', gstreamer_pipeline())
-                cap = cv2.VideoCapture(s)
-            # if s == 0:
-            #     print('[gstreamer] ', gstreamer_pipeline(sensor_id=s, capture_width=2880, capture_height=1860))
-            #     cap = cv2.VideoCapture(gstreamer_pipeline(sensor_id=s, capture_width=2880, capture_height=1860), cv2.CAP_GSTREAMER)
-            # elif s == 1:
-            #     print('[gstreamer] ', gstreamer_pipeline(sensor_id=s, capture_width=3840, capture_height=2160))
-            #     cap = cv2.VideoCapture(gstreamer_pipeline(sensor_id=s, capture_width=3840, capture_height=2160), cv2.CAP_GSTREAMER)
-            # elif s == 2:
-            #     print('[gstreamer] ', gstreamer_pipeline(sensor_id=s, capture_width=1920, capture_height=1080))
-            #     cap = cv2.VideoCapture(gstreamer_pipeline(sensor_id=s, capture_width=1920, capture_height=1080), cv2.CAP_GSTREAMER)
-            # else:
-            #     print('[gstreamer] ', gstreamer_pipeline())
-            #     cap = cv2.VideoCapture(s)
-            # cap = cv2.VideoCapture(s)
+            cap = cv2.VideoCapture(s)
             assert cap.isOpened(), f"{st}Failed to open {s}"
             w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
             h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
@@ -520,7 +498,12 @@ class LoadStreams:
             self.threads[i].start()
 
         # check for common shapes
-        s = np.stack([letterbox(x, img_size, stride=stride, auto=auto)[0].shape for x in self.imgs])
+        valid_shapes = [letterbox(x, img_size, stride=stride, auto=auto)[0].shape 
+                for x in self.imgs if letterbox(x, img_size, stride=stride, auto=auto)[0] is not None]
+        if valid_shapes:
+            s = np.stack(valid_shapes)
+        else:
+            s = np.array([])
         self.rect = np.unique(s, axis=0).shape[0] == 1  # rect inference if all shapes equal
         self.auto = auto and self.rect
         self.transforms = transforms  # optional

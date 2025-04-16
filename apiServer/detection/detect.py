@@ -68,12 +68,12 @@ def is_timestamp_more_than_second(timestamp_end, timestamp_start, interval):
 def camera_is_available(source, tp):
     print(f"source: {source}, type: {tp}")
     s = eval(source) if source.isnumeric() else source  # i.e. s = '0' local webcam
-    if type(s) == int:
-        print('[gstreamer] ', gstreamer_pipeline(sensor_id=s, capture_width=1920, capture_height=1080))
-        cap = cv2.VideoCapture(gstreamer_pipeline(sensor_id=s, capture_width=1920, capture_height=1080, tp=tp), cv2.CAP_GSTREAMER)
-    else:
-        print('[gstreamer] ', gstreamer_pipeline())
-        cap = cv2.VideoCapture(s)
+    # if type(s) == int:
+    #     print('[gstreamer] ', gstreamer_pipeline(sensor_id=s, capture_width=1920, capture_height=1080))
+    #     cap = cv2.VideoCapture(gstreamer_pipeline(sensor_id=s, capture_width=1920, capture_height=1080, tp=tp), cv2.CAP_GSTREAMER)
+    # else:
+    #     print('[gstreamer] ', gstreamer_pipeline())
+    cap = cv2.VideoCapture(s)
     if cap.isOpened():
         return True
     return False
@@ -81,12 +81,12 @@ def camera_is_available(source, tp):
 def get_camera_screen(source, tp):
     print(f"source: {source}, type: {tp}")
     s = eval(source) if source.isnumeric() else source  # i.e. s = '0' local webcam
-    if type(s) == int:
-        print('[gstreamer] ', gstreamer_pipeline(sensor_id=s, capture_width=1920, capture_height=1080))
-        cap = cv2.VideoCapture(gstreamer_pipeline(sensor_id=s, capture_width=1920, capture_height=1080, tp=tp), cv2.CAP_GSTREAMER)
-    else:
-        print('[gstreamer] ', gstreamer_pipeline())
-        cap = cv2.VideoCapture(s)
+    # if type(s) == int:
+    #     print('[gstreamer] ', gstreamer_pipeline(sensor_id=s, capture_width=1920, capture_height=1080))
+    #     cap = cv2.VideoCapture(gstreamer_pipeline(sensor_id=s, capture_width=1920, capture_height=1080, tp=tp), cv2.CAP_GSTREAMER)
+    # else:
+    #     print('[gstreamer] ', gstreamer_pipeline())
+    cap = cv2.VideoCapture(s)
     if cap.isOpened():
         success, im = cap.read()
         cap.release()
