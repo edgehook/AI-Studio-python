@@ -1,4 +1,4 @@
-# YOLOv5 🚀 by Ultralytics, AGPL-3.0 license
+# Ultralytics 🚀 AGPL-3.0 License - https://ultralytics.com/license
 """Logging utils."""
 
 import json
@@ -21,7 +21,11 @@ RANK = int(os.getenv("RANK", -1))
 try:
     from torch.utils.tensorboard import SummaryWriter
 except ImportError:
-    SummaryWriter = lambda *args: None  # None = SummaryWriter(str)
+
+    def SummaryWriter(*args):
+        """Fall back to SummaryWriter returning None if TensorBoard is not installed."""
+        return None  # None = SummaryWriter(str)
+
 
 try:
     import wandb
@@ -72,7 +76,8 @@ def _json_default(value):
 
 
 class Loggers:
-    # YOLOv5 Loggers class
+    """Initializes and manages various logging utilities for tracking YOLOv5 training and validation metrics."""
+
     def __init__(self, save_dir=None, weights=None, opt=None, hyp=None, logger=None, include=LOGGERS):
         """Initializes loggers for YOLOv5 training and validation metrics, paths, and options."""
         self.save_dir = save_dir
@@ -345,8 +350,9 @@ class Loggers:
 class GenericLogger:
     """
     YOLOv5 General purpose logger for non-task specific logging
-    Usage: from utils.loggers import GenericLogger; logger = GenericLogger(...)
-    Arguments
+    Usage: from utils.loggers import GenericLogger; logger = GenericLogger(...).
+
+    Arguments:
         opt:             Run arguments
         console_logger:  Console logger
         include:         loggers to include
@@ -382,7 +388,7 @@ class GenericLogger:
                 prefix = colorstr("ClearML: ")
                 LOGGER.warning(
                     f"{prefix}WARNING ⚠️ ClearML is installed but not configured, skipping ClearML logging."
-                    f" See https://github.com/ultralytics/yolov5/tree/master/utils/loggers/clearml#readme"
+                    f" See https://docs.ultralytics.com/yolov5/tutorials/clearml_logging_integration"
                 )
         else:
             self.clearml = None

@@ -123,7 +123,7 @@ def exif_size(img):
 def exif_transpose(image):
     """
     Transpose a PIL image accordingly if it has an EXIF Orientation tag.
-    Inplace version of https://github.com/python-pillow/Pillow/blob/master/src/PIL/ImageOps.py exif_transpose()
+    Inplace version of https://github.com/python-pillow/Pillow/blob/master/src/PIL/ImageOps.py exif_transpose().
 
     :param image: The image to transpose.
     :return: An image.
@@ -161,12 +161,14 @@ def seed_worker(worker_id):
 # Inherit from DistributedSampler and override iterator
 # https://github.com/pytorch/pytorch/blob/master/torch/utils/data/distributed.py
 class SmartDistributedSampler(distributed.DistributedSampler):
+    """A distributed sampler ensuring deterministic shuffling and balanced data distribution across GPUs."""
+
     def __iter__(self):
         """Yields indices for distributed data sampling, shuffled deterministically based on epoch and seed."""
         g = torch.Generator()
         g.manual_seed(self.seed + self.epoch)
 
-        # determine the the eventual size (n) of self.indices (DDP indices)
+        # determine the eventual size (n) of self.indices (DDP indices)
         n = int((len(self.dataset) - self.rank - 1) / self.num_replicas) + 1  # num_replicas == WORLD_SIZE
         idx = torch.randperm(n, generator=g)
         if not self.shuffle:
@@ -204,6 +206,7 @@ def create_dataloader(
     shuffle=False,
     seed=0,
 ):
+    """Creates and returns a configured DataLoader instance for loading and processing image datasets."""
     if rect and shuffle:
         LOGGER.warning("WARNING ⚠️ --rect is incompatible with DataLoader shuffle, setting shuffle=False")
         shuffle = False
@@ -237,6 +240,7 @@ def create_dataloader(
         shuffle=shuffle and sampler is None,
         num_workers=nw,
         sampler=sampler,
+        drop_last=quad,
         pin_memory=PIN_MEMORY,
         collate_fn=LoadImagesAndLabels.collate_fn4 if quad else LoadImagesAndLabels.collate_fn,
         worker_init_fn=seed_worker,
@@ -288,7 +292,8 @@ class _RepeatSampler:
 
 
 class LoadScreenshots:
-    # YOLOv5 screenshot dataloader, i.e. `python detect.py --source "screen 0 100 100 512 256"`
+    """Loads and processes screenshots for YOLOv5 detection from specified screen regions using mss."""
+
     def __init__(self, source, img_size=640, stride=32, auto=True, transforms=None):
         """
         Initializes a screenshot dataloader for YOLOv5 with specified source region, image size, stride, auto, and
@@ -345,7 +350,7 @@ class LoadScreenshots:
 
 
 class LoadImages:
-    """YOLOv5 image/video dataloader, i.e. `python detect.py --source image.jpg/vid.mp4`"""
+    """YOLOv5 image/video dataloader, i.e. `python detect.py --source image.jpg/vid.mp4`."""
 
     def __init__(self, path, img_size=640, stride=32, auto=True, transforms=None, vid_stride=1):
         """Initializes YOLOv5 loader for images/videos, supporting glob patterns, directories, and lists of paths."""
@@ -382,8 +387,7 @@ class LoadImages:
         else:
             self.cap = None
         assert self.nf > 0, (
-            f"No images or videos found in {p}. "
-            f"Supported formats are:\nimages: {IMG_FORMATS}\nvideos: {VID_FORMATS}"
+            f"No images or videos found in {p}. Supported formats are:\nimages: {IMG_FORMATS}\nvideos: {VID_FORMATS}"
         )
 
     def __iter__(self):
@@ -439,8 +443,7 @@ class LoadImages:
         self.frame = 0
         self.cap = cv2.VideoCapture(path)
         self.frames = int(self.cap.get(cv2.CAP_PROP_FRAME_COUNT) / self.vid_stride)
-        #self.orientation = int(self.cap.get(cv2.CAP_PROP_ORIENTATION_META))  # rotation degrees
-        self.orientation = int(self.cap.get(48))
+        self.orientation = int(self.cap.get(cv2.CAP_PROP_ORIENTATION_META))  # rotation degrees
         # self.cap.set(cv2.CAP_PROP_ORIENTATION_AUTO, 0)  # disable https://github.com/ultralytics/yolov5/issues/8493
 
     def _cv2_rotate(self, im):
@@ -496,14 +499,10 @@ class LoadStreams:
             self.threads[i] = Thread(target=self.update, args=([i, cap, s]), daemon=True)
             LOGGER.info(f"{st} Success ({self.frames[i]} frames {w}x{h} at {self.fps[i]:.2f} FPS)")
             self.threads[i].start()
+        LOGGER.info("")  # newline
 
         # check for common shapes
-        valid_shapes = [letterbox(x, img_size, stride=stride, auto=auto)[0].shape 
-                for x in self.imgs if letterbox(x, img_size, stride=stride, auto=auto)[0] is not None]
-        if valid_shapes:
-            s = np.stack(valid_shapes)
-        else:
-            s = np.array([])
+        s = np.stack([letterbox(x, img_size, stride=stride, auto=auto)[0].shape for x in self.imgs])
         self.rect = np.unique(s, axis=0).shape[0] == 1  # rect inference if all shapes equal
         self.auto = auto and self.rect
         self.transforms = transforms  # optional
@@ -569,7 +568,8 @@ def img2label_paths(img_paths):
 
 
 class LoadImagesAndLabels(Dataset):
-    # YOLOv5 train_loader/val_loader, loads images and labels for training and validation
+    """Loads images and their corresponding labels for training and validation in YOLOv5."""
+
     cache_version = 0.6  # dataset labels *.cache version
     rand_interp_methods = [cv2.INTER_NEAREST, cv2.INTER_LINEAR, cv2.INTER_CUBIC, cv2.INTER_AREA, cv2.INTER_LANCZOS4]
 
@@ -591,6 +591,7 @@ class LoadImagesAndLabels(Dataset):
         rank=-1,
         seed=0,
     ):
+        """Initializes the YOLOv5 dataset loader, handling images and their labels, caching, and preprocessing."""
         self.img_size = img_size
         self.augment = augment
         self.hyp = hyp
@@ -720,16 +721,17 @@ class LoadImagesAndLabels(Dataset):
             b, gb = 0, 1 << 30  # bytes of cached images, bytes per gigabytes
             self.im_hw0, self.im_hw = [None] * n, [None] * n
             fcn = self.cache_images_to_disk if cache_images == "disk" else self.load_image
-            results = ThreadPool(NUM_THREADS).imap(lambda i: (i, fcn(i)), self.indices)
-            pbar = tqdm(results, total=len(self.indices), bar_format=TQDM_BAR_FORMAT, disable=LOCAL_RANK > 0)
-            for i, x in pbar:
-                if cache_images == "disk":
-                    b += self.npy_files[i].stat().st_size
-                else:  # 'ram'
-                    self.ims[i], self.im_hw0[i], self.im_hw[i] = x  # im, hw_orig, hw_resized = load_image(self, i)
-                    b += self.ims[i].nbytes * WORLD_SIZE
-                pbar.desc = f"{prefix}Caching images ({b / gb:.1f}GB {cache_images})"
-            pbar.close()
+            with ThreadPool(NUM_THREADS) as pool:
+                results = pool.imap(lambda i: (i, fcn(i)), self.indices)
+                pbar = tqdm(results, total=len(self.indices), bar_format=TQDM_BAR_FORMAT, disable=LOCAL_RANK > 0)
+                for i, x in pbar:
+                    if cache_images == "disk":
+                        b += self.npy_files[i].stat().st_size
+                    else:  # 'ram'
+                        self.ims[i], self.im_hw0[i], self.im_hw[i] = x  # im, hw_orig, hw_resized = load_image(self, i)
+                        b += self.ims[i].nbytes * WORLD_SIZE
+                    pbar.desc = f"{prefix}Caching images ({b / gb:.1f}GB {cache_images})"
+                pbar.close()
 
     def check_cache_ram(self, safety_margin=0.1, prefix=""):
         """Checks if available RAM is sufficient for caching images, adjusting for a safety margin."""
@@ -744,8 +746,8 @@ class LoadImagesAndLabels(Dataset):
         cache = mem_required * (1 + safety_margin) < mem.available  # to cache or not to cache, that is the question
         if not cache:
             LOGGER.info(
-                f'{prefix}{mem_required / gb:.1f}GB RAM required, '
-                f'{mem.available / gb:.1f}/{mem.total / gb:.1f}GB available, '
+                f"{prefix}{mem_required / gb:.1f}GB RAM required, "
+                f"{mem.available / gb:.1f}/{mem.total / gb:.1f}GB available, "
                 f"{'caching images ✅' if cache else 'not caching images ⚠️'}"
             )
         return cache
@@ -805,8 +807,7 @@ class LoadImagesAndLabels(Dataset):
         index = self.indices[index]  # linear, shuffled, or image_weights
 
         hyp = self.hyp
-        mosaic = self.mosaic and random.random() < hyp["mosaic"]
-        if mosaic:
+        if mosaic := self.mosaic and random.random() < hyp["mosaic"]:
             # Load mosaic
             img, labels = self.load_mosaic(index)
             shapes = None
@@ -1140,8 +1141,9 @@ def extract_boxes(path=DATASETS_DIR / "coco128"):
 
 def autosplit(path=DATASETS_DIR / "coco128/images", weights=(0.9, 0.1, 0.0), annotated_only=False):
     """Autosplit a dataset into train/val/test splits and save path/autosplit_*.txt files
-    Usage: from utils.dataloaders import *; autosplit()
-    Arguments
+    Usage: from utils.dataloaders import *; autosplit().
+
+    Arguments:
         path:            Path to images directory
         weights:         Train, val, test weights (list, tuple)
         annotated_only:  Only use images with an annotated txt file
@@ -1192,8 +1194,7 @@ def verify_image_label(args):
                     segments = [np.array(x[1:], dtype=np.float32).reshape(-1, 2) for x in lb]  # (cls, xy1...)
                     lb = np.concatenate((classes.reshape(-1, 1), segments2boxes(segments)), 1)  # (cls, xywh)
                 lb = np.array(lb, dtype=np.float32)
-            nl = len(lb)
-            if nl:
+            if nl := len(lb):
                 assert lb.shape[1] == 5, f"labels require 5 columns, {lb.shape[1]} columns detected"
                 assert (lb >= 0).all(), f"negative label values {lb[lb < 0]}"
                 assert (lb[:, 1:] <= 1).all(), f"non-normalized or out of bounds coordinates {lb[:, 1:][lb[:, 1:] > 1]}"
@@ -1220,7 +1221,7 @@ class HUBDatasetStats:
     """
     Class for generating HUB dataset JSON and `-hub` dataset directory.
 
-    Arguments
+    Arguments:
         path:           Path to data.yaml or data.zip (with data.yaml inside data.zip)
         autodownload:   Attempt to download dataset if not found locally
 
@@ -1351,7 +1352,7 @@ class ClassificationDataset(torchvision.datasets.ImageFolder):
     """
     YOLOv5 Classification Dataset.
 
-    Arguments
+    Arguments:
         root:  Dataset path
         transform:  torchvision transforms, used by default
         album_transform: Albumentations transforms, used if installed
@@ -1390,6 +1391,7 @@ def create_classification_dataloader(
     path, imgsz=224, batch_size=16, augment=True, cache=False, rank=-1, workers=8, shuffle=True
 ):
     # Returns Dataloader object to be used with YOLOv5 Classifier
+    """Creates a DataLoader for image classification, supporting caching, augmentation, and distributed training."""
     with torch_distributed_zero_first(rank):  # init dataset *.cache only once if DDP
         dataset = ClassificationDataset(root=path, imgsz=imgsz, augment=augment, cache=cache)
     batch_size = min(batch_size, len(dataset))
